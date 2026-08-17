@@ -15,6 +15,11 @@ import time         # Para operações com tempo
 import gpu          # Simula os recursos de uma GPU
 import math         # Funções matemáticas
 import numpy as np  # Biblioteca do Numpy
+import random
+
+type Vec2 = tuple[float, float]
+type Triangle = tuple[Vec2, Vec2, Vec2]
+type Color = tuple[int, int, int]
 
 class GL:
     """Classe que representa a biblioteca gráfica (Graphics Library)."""
@@ -95,9 +100,53 @@ class GL:
         gpu.GPU.draw_pixel([pos_x, pos_y], gpu.GPU.RGB8, [255, 0, 255])  # altera pixel (u, v, tipo, r, g, b)
         # cuidado com as cores, o X3D especifica de (0,1) e o Framebuffer de (0,255)
 
+    @staticmethod
+    def _insideTriangle(triangle: Triangle, p: Vec2) -> bool:
+        # Checa se o ponto p está dentro do triangulo
+        def inside(
+            triangle: Triangle,
+            pos: Vec2
+        ) -> bool:
+            A, B, C = triangle
+            return line(A, B, pos) >= 0 and \
+                   line(B, C, pos) >= 0 and \
+                   line(C, A, pos) >= 0
+
+        # Função de linha. Retorna > 0 para dentro e < para fora.
+        def line(A: Vec2, B: Vec2, X: Vec2) -> float:
+            x0, y0 = A
+            x1, y1 = B
+            x, y = X
+            return (y1 - y0) * x \
+                   - (x1 - x0) * y \
+                   + (x1 - x0) * y0 \
+                   - (y1 - y0) * x0
+
+        # Ajusta o ponto para pegar o meio do pixel
+        def get_center_point(A: Vec2) -> Vec2:
+            return (A[0] + 0.5, A[1] + 0.5)
+
+        p = get_center_point(p)
+        return inside(triangle, p)
 
     @staticmethod
-    def triangleSet2D(vertices, colors):
+    def newColor() -> Color:
+        return (
+            random.randint(0, 255),
+            random.randint(0, 255),
+            random.randint(0, 255),
+        )
+
+    @staticmethod
+    def colorMultiply(color: Color, factor: tuple[float, float, float]) -> Color:
+        return (
+            int(color[0] * factor[0]),
+            int(color[1] * factor[1]),
+            int(color[2] * factor[2]),
+        )
+
+    @staticmethod
+    def triangleSet2D(vertices: list[float], colors: dict):
         """Função usada para renderizar TriangleSet2D."""
         # https://www.web3d.org/specifications/X3Dv4/ISO-IEC19775-1v4-IS/Part01/components/geometry2D.html#TriangleSet2D
         # Nessa função você receberá os vertices de um triângulo no parâmetro vertices,
@@ -110,8 +159,49 @@ class GL:
         print("TriangleSet2D : vertices = {0}".format(vertices)) # imprime no terminal
         print("TriangleSet2D : colors = {0}".format(colors)) # imprime no terminal as cores
 
-        # Exemplo:
-        gpu.GPU.draw_pixel([6, 8], gpu.GPU.RGB8, [255, 255, 0])  # altera pixel (u, v, tipo, r, g, b)
+
+        min_x, min_y = (float('inf'), float('inf'))
+        max_x, max_y = (0, 0)
+        triangles: list[tuple[Triangle, Color]] = []
+
+        # Take 3 points from the list each time
+        for i in range(0, len(vertices) // 6):
+            i = i * 6
+            triangle: Triangle = (
+                (vertices[i], vertices[i + 1]),
+                (vertices[i + 2], vertices[i + 3]),
+                (vertices[i + 4], vertices[i + 5]),
+            )
+
+            triangles.append(
+                (triangle, GL.newColor())
+            )
+
+            # Update min points and max points to optimize draw calls
+            # This way we don't need to draw pixels where no triangles could ever be
+            for x, y in triangle:
+                if x < min_x:
+                    min_x = x
+                elif x > max_x:
+                    max_x = x
+
+                if y < min_y:
+                    min_y = y
+                elif y > max_y:
+                    max_y = y
+
+        for y in range(int(min_y), int(max_y)):
+            for x in range(int(min_x), int(max_x)):
+                coord: Vec2 = (x, y)
+                for t, color in triangles:
+                    if not GL._insideTriangle(t, coord):
+                        continue
+
+                    gpu.GPU.draw_pixel(
+                        coord,
+                        gpu.GPU.RGB8,
+                        GL.colorMultiply(color, colors["emissiveColor"])
+                    )
 
 
     @staticmethod
