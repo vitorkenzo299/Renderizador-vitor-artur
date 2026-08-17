@@ -43,15 +43,26 @@ class GL:
         # pelo tamanho da lista e assuma que sempre vira uma quantidade par de valores.
         # O parâmetro colors é um dicionário com os tipos cores possíveis, para o Polypoint2D
         # você pode assumir inicialmente o desenho dos pontos com a cor emissiva (emissiveColor).
+        lista = []
+        for i in colors["emissiveColor"]:
+            lista.append(int(i*255))
+            print(lista)
+
+        for p in range(0, len(point) // 2):
+            p = p * 2
+            posx = int(point[p])
+            posy = int(point[p+1])
+            gpu.GPU.draw_pixel([posx, posy], gpu.GPU.RGB8,lista)
+
 
         # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
         print("Polypoint2D : pontos = {0}".format(point)) # imprime no terminal pontos
         print("Polypoint2D : colors = {0}".format(colors)) # imprime no terminal as cores
 
         # Exemplo:
-        pos_x = GL.width//2
-        pos_y = GL.height//2
-        gpu.GPU.draw_pixel([pos_x, pos_y], gpu.GPU.RGB8, [255, 0, 0])  # altera pixel (u, v, tipo, r, g, b)
+        # pos_x = GL.width//2
+        # pos_y = GL.height//2
+        # gpu.GPU.draw_pixel([pos_x, pos_y], gpu.GPU.RGB8, [255, 0, 0])  # altera pixel (u, v, tipo, r, g, b)
         # cuidado com as cores, o X3D especifica de (0,1) e o Framebuffer de (0,255)
         
     @staticmethod
@@ -67,14 +78,67 @@ class GL:
         # vira uma quantidade par de valores.
         # O parâmetro colors é um dicionário com os tipos cores possíveis, para o Polyline2D
         # você pode assumir inicialmente o desenho das linhas com a cor emissiva (emissiveColor).
+        lista = []
+
+        for i in colors["emissiveColor"]:
+            lista.append(int(i * 255))
+
+        for p in range(0, len(lineSegments) - 2, 2):
+            x0 = int(lineSegments[p])
+            y0 = int(lineSegments[p + 1])
+            x1 = int(lineSegments[p + 2])
+            y1 = int(lineSegments[p + 3])
+
+            if y0 == y1:
+                if x0 <= x1:
+                    for x in range(x0, x1 + 1):
+                        gpu.GPU.draw_pixel([x, y0],gpu.GPU.RGB8,lista)
+                else:
+                    for x in range(x0, x1 - 1, -1):
+                        gpu.GPU.draw_pixel([x, y0],gpu.GPU.RGB8,lista)
+            elif x0 == x1:
+
+                if y0 <= y1:
+                    for y in range(y0, y1 + 1):
+                        gpu.GPU.draw_pixel([x0, y],gpu.GPU.RGB8,lista)
+                else:
+                    for y in range(y0, y1 - 1, -1):
+                        gpu.GPU.draw_pixel([x0, y],gpu.GPU.RGB8,lista)
+            else:
+                dif_x = abs(x1 - x0)
+                dif_y = abs(y1 - y0)
+                
+                if x0 < x1:
+                    sx = 1
+                else:
+                    sx = -1
+
+                if y0 < y1:
+                    sy = 1
+                else:
+                    sy = -1
+                erro = dif_x - dif_y
+
+                while x0 != x1 or y0 != y1:
+                    gpu.GPU.draw_pixel([x0, y0], gpu.GPU.RGB8, lista)
+                    v = 2 * erro
+                    if v > -dif_y:
+                        erro -= dif_y
+                        x0 += sx
+
+                    if v < dif_x:
+                        erro += dif_x
+                        y0 += sy
+                gpu.GPU.draw_pixel([x1, y1], gpu.GPU.RGB8, lista)
+
 
         print("Polyline2D : lineSegments = {0}".format(lineSegments)) # imprime no terminal
         print("Polyline2D : colors = {0}".format(colors)) # imprime no terminal as cores
         
         # Exemplo:
-        pos_x = GL.width//2
-        pos_y = GL.height//2
-        gpu.GPU.draw_pixel([pos_x, pos_y], gpu.GPU.RGB8, [255, 0, 255])  # altera pixel (u, v, tipo, r, g, b)
+        # pos_x = GL.width//2
+        # pos_y = GL.height//2
+        # gpu.GPU.draw_pixel([pos_x, pos_y], gpu.GPU.RGB8, [255, 0, 255])  # altera pixel (u, v, tipo, r, g, b)
         # cuidado com as cores, o X3D especifica de (0,1) e o Framebuffer de (0,255)
 
     @staticmethod
