@@ -202,15 +202,15 @@ class GL:
         )
 
     @staticmethod
-    def colorMultiply(color: Color, factor: tuple[float, float, float]) -> Color:
+    def colorMultiply(color: Color) -> Color:
         return (
-            int(color[0] * factor[0]),
-            int(color[1] * factor[1]),
-            int(color[2] * factor[2]),
+            int(color[0] * 255),
+            int(color[1] * 255),
+            int(color[2] * 255),
         )
 
     @staticmethod
-    def triangleSet2D(vertices: list[float], colors: dict):
+    def triangleSet2D(vertices: list[float], colors: dict[str, Color]):
         """Função usada para renderizar TriangleSet2D."""
         # https://www.web3d.org/specifications/X3Dv4/ISO-IEC19775-1v4-IS/Part01/components/geometry2D.html#TriangleSet2D
         # Nessa função você receberá os vertices de um triângulo no parâmetro vertices,
@@ -224,12 +224,12 @@ class GL:
         print("TriangleSet2D : colors = {0}".format(colors)) # imprime no terminal as cores
 
 
-        min_x, min_y = (float('inf'), float('inf'))
-        max_x, max_y = (0, 0)
-        triangles: list[tuple[Triangle, Color]] = []
 
         # Take 3 points from the list each time
-        for i in range(0, len(vertices) // 6):
+        for i in range(len(vertices) // 6):
+            min_x, min_y = (float('inf'), float('inf'))
+            max_x, max_y = (0, 0)
+
             i = i * 6
             triangle: Triangle = (
                 (vertices[i], vertices[i + 1]),
@@ -237,34 +237,34 @@ class GL:
                 (vertices[i + 4], vertices[i + 5]),
             )
 
-            triangles.append(
-                (triangle, GL.newColor())
-            )
-
             # Update min points and max points to optimize draw calls
             # This way we don't need to draw pixels where no triangles could ever be
             for x, y in triangle:
                 if x < min_x:
                     min_x = x
-                elif x > max_x:
+                if x > max_x:
                     max_x = x
 
                 if y < min_y:
                     min_y = y
-                elif y > max_y:
+                if y > max_y:
                     max_y = y
 
-        for y in range(int(min_y), int(max_y)):
-            for x in range(int(min_x), int(max_x)):
-                coord: Vec2 = (x, y)
-                for t, color in triangles:
-                    if not GL._insideTriangle(t, coord):
+            min_y = max(min_y, 0)
+            min_x = max(min_x, 0)
+            max_y = min(max_y, GL.height - 1)
+            max_x = min(max_x, GL.width - 1)
+
+            for y in range(int(min_y), int(max_y) + 1):
+                for x in range(int(min_x), int(max_x) + 1):
+                    coord: Vec2 = (x, y)
+                    if not GL._insideTriangle(triangle, coord):
                         continue
 
                     gpu.GPU.draw_pixel(
                         coord,
                         gpu.GPU.RGB8,
-                        GL.colorMultiply(color, colors["emissiveColor"])
+                        GL.colorMultiply(colors["emissiveColor"])
                     )
 
 
