@@ -224,12 +224,7 @@ class GL:
         print("TriangleSet2D : vertices = {0}".format(vertices)) # imprime no terminal
         print("TriangleSet2D : colors = {0}".format(colors)) # imprime no terminal as cores
 
-        for x, y in rendererrs.get_triangle_pixels(vertices, GL.width, GL.height):
-            gpu.GPU.draw_pixel(
-                (x, y),
-                gpu.GPU.RGB8,
-                GL.colorMultiply(colors["emissiveColor"])
-            )
+        rendererrs.render_triangle(vertices, GL.width, GL.height, colors["emissiveColor"], gpu.GPU)
 
 
 

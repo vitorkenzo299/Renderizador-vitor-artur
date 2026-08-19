@@ -1,6 +1,6 @@
 use pyo3::prelude::*;
 
-
+type Colorf = Vec<f32>;
 type Vec2 = (f32, f32);
 type Triangle = (Vec2, Vec2, Vec2);
 
@@ -24,13 +24,20 @@ fn inside_triangle(triangle: Triangle, p: Vec2) -> bool {
 }
 
 #[pyfunction]
-fn get_triangle_pixels(
+fn render_triangle(
     vertices: Vec<f32>,
     width: usize,
-    height: usize
-) -> PyResult<Vec<(usize, usize)>> {
-
-    let mut vec = vec![];
+    height: usize,
+    color: Colorf,
+    gpu: &Bound<'_, PyAny>,
+) -> PyResult<()> {   
+    let color = (
+        (color[0] * 255.0) as u8,
+        (color[1] * 255.0) as u8,
+        (color[2] * 255.0) as u8,
+    );
+    let draw_pixel = gpu.getattr("draw_pixel")?;                       
+    let rgb8 = gpu.getattr("RGB8")?;
 
     for verts in vertices.chunks(6) {
         let a = (verts[0], verts[1]);
@@ -57,17 +64,21 @@ fn get_triangle_pixels(
                     continue;
                 }
 
-                vec.push((x, y));
+                draw_pixel.call1((
+                    (x, y),
+                    &rgb8,
+                    color,
+                ))?;
             }
         }
     }
     
-    Ok(vec)
+    Ok(())
 }
 
 #[pymodule]
 fn rendererrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(get_triangle_pixels, m)?)?;
+    m.add_function(wrap_pyfunction!(render_triangle, m)?)?;
 
     Ok(())
 }
