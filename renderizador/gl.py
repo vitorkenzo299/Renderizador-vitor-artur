@@ -16,7 +16,7 @@ import gpu          # Simula os recursos de uma GPU
 import math         # Funções matemáticas
 import numpy as np  # Biblioteca do Numpy
 import random
-import rendererrs
+import insper_compgraf_renderer_rs as rendrs
 
 type Vec2 = tuple[float, float]
 type Triangle = tuple[Vec2, Vec2, Vec2]
@@ -224,7 +224,7 @@ class GL:
         print("TriangleSet2D : vertices = {0}".format(vertices)) # imprime no terminal
         print("TriangleSet2D : colors = {0}".format(colors)) # imprime no terminal as cores
 
-        rendererrs.render_triangle(vertices, GL.width, GL.height, colors["emissiveColor"], gpu.GPU)
+        rendrs.render_triangle(vertices, GL.width, GL.height, colors["emissiveColor"], gpu.GPU)
 
         # # Take 3 points from the list each time
         # for i in range(len(vertices) // 6):

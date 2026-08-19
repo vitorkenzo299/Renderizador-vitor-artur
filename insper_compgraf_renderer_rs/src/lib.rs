@@ -77,7 +77,7 @@ fn render_triangle(
 }
 
 #[pymodule]
-fn rendererrs(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn insper_compgraf_renderer_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(render_triangle, m)?)?;
 
     Ok(())

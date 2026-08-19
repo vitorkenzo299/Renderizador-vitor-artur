@@ -1,6 +1,7 @@
 contourpy==1.3.3
 cycler==0.12.1
 fonttools==4.63.0
+insper_compgraf_renderer_rs==0.1.0
 kiwisolver==1.5.0
 matplotlib==3.11.1
 maturin==1.14.1
@@ -10,5 +11,5 @@ pillow==12.3.0
 pyparsing==3.3.2
 python-dateutil==2.9.0.post0
 QtPy==2.4.3
--e git+ssh://git@github.com/vitorkenzo299/Renderizador-vitor-artur.git@65f6a540de6e79284eb185661ab2aca3b5029026#egg=rendererrs&subdirectory=rendererrs
+rendererrs @ file:///home/artur/dev/compgraf/projetos/Renderizador-vitor-artur/rendererrs/target/wheels/rendererrs-0.1.0-cp314-cp314-manylinux_2_34_x86_64.whl#sha256=b046a1dd584b25d463918e9d9eac9c82617a4b6b851d046a5b9cc1eb371906fb
 six==1.17.0
