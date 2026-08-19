@@ -16,7 +16,7 @@ import gpu          # Simula os recursos de uma GPU
 import math         # Funções matemáticas
 import numpy as np  # Biblioteca do Numpy
 import random
-import rendererrs
+import insper_compgraf_renderer_rs as rendrs
 
 type Vec2 = tuple[float, float]
 type Triangle = tuple[Vec2, Vec2, Vec2]
@@ -223,51 +223,8 @@ class GL:
         # você pode assumir inicialmente o desenho das linhas com a cor emissiva (emissiveColor).
         print("TriangleSet2D : vertices = {0}".format(vertices)) # imprime no terminal
         print("TriangleSet2D : colors = {0}".format(colors)) # imprime no terminal as cores
-
-        # rendererrs.render_triangle(vertices, GL.width, GL.height, colors["emissiveColor"], gpu.GPU)
-
-        # Take 3 points from the list each time
-        for i in range(len(vertices) // 6):
-            min_x, min_y = (float('inf'), float('inf'))
-            max_x, max_y = (0, 0)
         
-            i = i * 6
-            triangle: Triangle = (
-                (vertices[i], vertices[i + 1]),
-                (vertices[i + 2], vertices[i + 3]),
-                (vertices[i + 4], vertices[i + 5]),
-            )
-        
-            # Update min points and max points to optimize draw calls
-            # This way we don't need to draw pixels where no triangles could ever be
-            for x, y in triangle:
-                if x < min_x:
-                    min_x = x
-                if x > max_x:
-                    max_x = x
-        
-                if y < min_y:
-                    min_y = y
-                if y > max_y:
-                    max_y = y
-        
-            min_y = max(min_y, 0)
-            min_x = max(min_x, 0)
-            max_y = min(max_y, GL.height - 1)
-            max_x = min(max_x, GL.width - 1)
-        
-            for y in range(int(min_y), int(max_y) + 1):
-                for x in range(int(min_x), int(max_x) + 1):
-                    coord: Vec2 = (x, y)
-                    if not GL._insideTriangle(triangle, coord):
-                        continue
-        
-                    gpu.GPU.draw_pixel(
-                        coord,
-                        gpu.GPU.RGB8,
-                        GL.colorMultiply(colors["emissiveColor"])
-                    )
-
+        rendrs.render_triangle(vertices, GL.width, GL.height, colors["emissiveColor"], gpu.GPU)
 
     @staticmethod
     def triangleSet(point, colors):
