@@ -226,9 +226,6 @@ class GL:
 
         rendererrs.render_triangle(vertices, GL.width, GL.height, colors["emissiveColor"], gpu.GPU)
 
-
-
-
         # # Take 3 points from the list each time
         # for i in range(len(vertices) // 6):
         #     min_x, min_y = (float('inf'), float('inf'))
