@@ -10,5 +10,4 @@ pillow==12.3.0
 pyparsing==3.3.2
 python-dateutil==2.9.0.post0
 QtPy==2.4.3
--e git+ssh://git@github.com/vitorkenzo299/Renderizador-vitor-artur.git@65f6a540de6e79284eb185661ab2aca3b5029026#egg=rendererrs&subdirectory=rendererrs
 six==1.17.0
