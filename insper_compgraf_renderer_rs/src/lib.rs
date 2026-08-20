@@ -30,7 +30,7 @@ fn render_triangle(
     height: usize,
     color: Colorf,
     gpu: &Bound<'_, PyAny>,
-) -> PyResult<()> {   
+) -> PyResult<()> {
     let color = (
         (color[0] * 255.0) as u8,
         (color[1] * 255.0) as u8,

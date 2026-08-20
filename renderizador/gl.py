@@ -61,10 +61,6 @@ class GL:
             gpu.GPU.draw_pixel([posx, posy], gpu.GPU.RGB8,lista)
 
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("Polypoint2D : pontos = {0}".format(point)) # imprime no terminal pontos
-        print("Polypoint2D : colors = {0}".format(colors)) # imprime no terminal as cores
-
         # Exemplo:
         # pos_x = GL.width//2
         # pos_y = GL.height//2
@@ -138,9 +134,6 @@ class GL:
                 gpu.GPU.draw_pixel([x1, y1], gpu.GPU.RGB8, lista)
 
 
-        print("Polyline2D : lineSegments = {0}".format(lineSegments)) # imprime no terminal
-        print("Polyline2D : colors = {0}".format(colors)) # imprime no terminal as cores
-        
         # Exemplo:
         # pos_x = GL.width//2
         # pos_y = GL.height//2
@@ -156,14 +149,15 @@ class GL:
         # O parâmetro colors é um dicionário com os tipos cores possíveis, para o Circle2D
         # você pode assumir o desenho das linhas com a cor emissiva (emissiveColor).
 
-        print("Circle2D : radius = {0}".format(radius)) # imprime no terminal
-        print("Circle2D : colors = {0}".format(colors)) # imprime no terminal as cores
-        
-        # Exemplo:
-        pos_x = GL.width//2
-        pos_y = GL.height//2
-        gpu.GPU.draw_pixel([pos_x, pos_y], gpu.GPU.RGB8, [255, 0, 255])  # altera pixel (u, v, tipo, r, g, b)
-        # cuidado com as cores, o X3D especifica de (0,1) e o Framebuffer de (0,255)
+        for deg in range(360):
+            rad = math.radians(deg)
+            x = round(math.cos(rad) * radius)
+            y = round(math.sin(rad) * radius)
+
+            if x < 0 or x >= GL.width or y < 0 or y >= GL.height:
+                continue
+
+            gpu.GPU.draw_pixel((x, y), gpu.GPU.RGB8, GL.colorMultiply(colors["emissiveColor"]))  
 
     @staticmethod
     def _insideTriangle(triangle: Triangle, p: Vec2) -> bool:
