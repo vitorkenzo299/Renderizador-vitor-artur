@@ -94,18 +94,22 @@ class GL:
             if y0 == y1:
                 if x0 <= x1:
                     for x in range(x0, x1 + 1):
-                        gpu.GPU.draw_pixel([x, y0],gpu.GPU.RGB8,lista)
+                        if 0 <= x < GL.width and 0 <= y0 < GL.height:
+                            gpu.GPU.draw_pixel([x, y0],gpu.GPU.RGB8,lista)
                 else:
                     for x in range(x0, x1 - 1, -1):
-                        gpu.GPU.draw_pixel([x, y0],gpu.GPU.RGB8,lista)
+                        if 0 <= x < GL.width and 0 <= y0 < GL.height:
+                            gpu.GPU.draw_pixel([x, y0],gpu.GPU.RGB8,lista)
             elif x0 == x1:
 
                 if y0 <= y1:
                     for y in range(y0, y1 + 1):
-                        gpu.GPU.draw_pixel([x0, y],gpu.GPU.RGB8,lista)
+                        if 0 <= x0 < GL.width and 0 <= y < GL.height:
+                            gpu.GPU.draw_pixel([x0, y],gpu.GPU.RGB8,lista)
                 else:
                     for y in range(y0, y1 - 1, -1):
-                        gpu.GPU.draw_pixel([x0, y],gpu.GPU.RGB8,lista)
+                        if 0 <= x0 < GL.width and 0 <= y < GL.height:
+                            gpu.GPU.draw_pixel([x0, y],gpu.GPU.RGB8,lista)
             else:
                 dif_x = abs(x1 - x0)
                 dif_y = abs(y1 - y0)
@@ -122,7 +126,8 @@ class GL:
                 erro = dif_x - dif_y
 
                 while x0 != x1 or y0 != y1:
-                    gpu.GPU.draw_pixel([x0, y0], gpu.GPU.RGB8, lista)
+                    if 0 <= x0 < GL.width and 0 <= y0 < GL.height:
+                        gpu.GPU.draw_pixel([x0, y0],gpu.GPU.RGB8,lista)
                     v = 2 * erro
                     if v > -dif_y:
                         erro -= dif_y
@@ -131,7 +136,8 @@ class GL:
                     if v < dif_x:
                         erro += dif_x
                         y0 += sy
-                gpu.GPU.draw_pixel([x1, y1], gpu.GPU.RGB8, lista)
+                if 0 <= x1 < GL.width and 0 <= y1 < GL.height:
+                    gpu.GPU.draw_pixel([x1, y1],gpu.GPU.RGB8,lista)
 
 
         # Exemplo:
