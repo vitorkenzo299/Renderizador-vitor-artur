@@ -246,8 +246,33 @@ class GL:
         print("TriangleSet : pontos = {0}".format(point)) # imprime no terminal pontos
         print("TriangleSet : colors = {0}".format(colors)) # imprime no terminal as cores
 
-        # Exemplo de desenho de um pixel branco na coordenada 10, 10
         gpu.GPU.draw_pixel([10, 10], gpu.GPU.RGB8, [255, 255, 255])  # altera pixel
+
+        vertices2D = []
+
+        if not hasattr(GL, "model_matrix"):
+            GL.model_matrix = np.identity(4)
+
+        if not hasattr(GL, "view_matrix"):
+            GL.viewpoint([0, 0, 10], [0, 0, 1, 0], math.pi / 4)
+
+        for i in range(0, len(point), 3):
+            vertice = np.array([point[i], point[i + 1], point[i + 2], 1])
+
+            vertice = GL.model_matrix @ vertice
+            vertice = GL.view_matrix @ vertice
+            vertice = GL.projection_matrix @ vertice
+
+            if vertice[3] != 0:
+                vertice = vertice / vertice[3]
+
+            x = (vertice[0] + 1) * GL.width / 2
+            y = (1 - vertice[1]) * GL.height / 2
+
+            vertices2D.append(x)
+            vertices2D.append(y)
+
+        GL.triangleSet2D(vertices2D, colors)
 
     @staticmethod
     def viewpoint(position, orientation, fieldOfView):
@@ -261,6 +286,49 @@ class GL:
         print("position = {0} ".format(position), end='')
         print("orientation = {0} ".format(orientation), end='')
         print("fieldOfView = {0} ".format(fieldOfView))
+
+        T = np.identity(4)
+        T[0][3] = position[0]
+        T[1][3] = position[1]
+        T[2][3] = position[2]
+
+        x = orientation[0]
+        y = orientation[1]
+        z = orientation[2]
+        angulo = orientation[3]
+
+        tamanho = math.sqrt(x*x + y*y + z*z)
+
+        if tamanho != 0:
+            x = x / tamanho
+            y = y / tamanho
+            z = z / tamanho
+
+        c = math.cos(angulo)
+        s = math.sin(angulo)
+        t = 1 - c
+
+        R = np.array([
+            [t*x*x + c,   t*x*y - s*z, t*x*z + s*y, 0],
+            [t*x*y + s*z, t*y*y + c,   t*y*z - s*x, 0],
+            [t*x*z - s*y, t*y*z + s*x, t*z*z + c,   0],
+            [0,           0,           0,           1]
+        ])
+
+        camera_matrix = T @ R
+        GL.view_matrix = np.linalg.inv(camera_matrix)
+
+        aspect = GL.width / GL.height
+        f = 1 / math.tan(fieldOfView / 2)
+        near = GL.near
+        far = GL.far
+
+        GL.projection_matrix = np.array([
+            [f / aspect, 0, 0, 0],
+            [0, f, 0, 0],
+            [0, 0, (far + near) / (near - far), (2 * far * near) / (near - far)],
+            [0, 0, -1, 0]
+        ])
 
     @staticmethod
     def transform_in(translation, scale, rotation):
@@ -285,6 +353,48 @@ class GL:
         if rotation:
             print("rotation = {0} ".format(rotation), end='') # imprime no terminal
         print("")
+
+        if not translation:
+            translation = [0, 0, 0]
+        if not scale:
+            scale = [1, 1, 1]
+        if not rotation:
+            rotation = [0, 0, 1, 0]
+
+        T = np.identity(4)
+        T[0][3] = translation[0]
+        T[1][3] = translation[1]
+        T[2][3] = translation[2]
+
+        S = np.identity(4)
+        S[0][0] = scale[0]
+        S[1][1] = scale[1]
+        S[2][2] = scale[2]
+
+        x = rotation[0]
+        y = rotation[1]
+        z = rotation[2]
+        angulo = rotation[3]
+
+        tamanho = math.sqrt(x*x + y*y + z*z)
+
+        if tamanho != 0:
+            x = x / tamanho
+            y = y / tamanho
+            z = z / tamanho
+
+        c = math.cos(angulo)
+        s = math.sin(angulo)
+        t = 1 - c
+
+        R = np.array([
+            [t*x*x + c,   t*x*y - s*z, t*x*z + s*y, 0],
+            [t*x*y + s*z, t*y*y + c,   t*y*z - s*x, 0],
+            [t*x*z - s*y, t*y*z + s*x, t*z*z + c,   0],
+            [0,           0,           0,           1]
+        ])
+
+        GL.model_matrix = T @ R @ S
 
     @staticmethod
     def transform_out():
