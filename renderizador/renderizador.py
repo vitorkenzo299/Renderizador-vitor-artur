@@ -11,6 +11,7 @@ Data: 28 de Agosto de 2020
 
 import os           # Para rotinas do sistema operacional
 import argparse     # Para tratar os parâmetros da linha de comando
+import numpy as np
 
 import gl           # Recupera rotinas de suporte ao X3D
 
@@ -27,6 +28,8 @@ ALTURA = 40   # Valor padrão para altura da tela
 class Renderizador:
     """Realiza a renderização da cena informada."""
 
+    SUPERSAMPLING = 2
+
     def __init__(self):
         """Definindo valores padrão."""
         self.width = LARGURA
@@ -35,6 +38,9 @@ class Renderizador:
         self.image_file = "tela.png"
         self.scene = None
         self.framebuffers = {}
+        self.render_width = LARGURA * self.SUPERSAMPLING
+        self.render_height = ALTURA * self.SUPERSAMPLING
+        self._highres_color = None
 
     def setup(self):
         """Configura o sistema para a renderização."""
@@ -60,18 +66,19 @@ class Renderizador:
             self.framebuffers["FRONT"],
             gpu.GPU.COLOR_ATTACHMENT,
             gpu.GPU.RGB8,
-            self.width,
-            self.height
+            self.render_width,
+            self.render_height
         )
+        self._highres_color = None
 
-        # Descomente as seguintes linhas se for usar um Framebuffer para profundidade
-        # gpu.GPU.framebuffer_storage(
-        #     self.framebuffers["FRONT"],
-        #     gpu.GPU.DEPTH_ATTACHMENT,
-        #     gpu.GPU.DEPTH_COMPONENT32F,
-        #     self.width,
-        #     self.height
-        # )
+        # Buffer de profundidade usado pelo teste de visibilidade.
+        gpu.GPU.framebuffer_storage(
+            self.framebuffers["FRONT"],
+            gpu.GPU.DEPTH_ATTACHMENT,
+            gpu.GPU.DEPTH_COMPONENT32F,
+            self.render_width,
+            self.render_height
+        )
     
         # Opções:
         # - COLOR_ATTACHMENT: alocações para as cores da imagem renderizada
@@ -92,11 +99,17 @@ class Renderizador:
         gpu.GPU.clear_depth(1.0)
 
         # Definindo tamanho do Viewport para renderização
-        self.scene.viewport(width=self.width, height=self.height)
+        self.scene.viewport(width=self.render_width, height=self.render_height)
 
     def pre(self):
         """Rotinas pré renderização."""
         # Função invocada antes do processo de renderização iniciar.
+
+        # O framebuffer exposto ao usuário contém a imagem reduzida do frame
+        # anterior. Restaura o buffer de alta resolução antes de desenhar o próximo.
+        if self._highres_color is not None:
+            gpu.GPU.frame_buffer[gpu.GPU.draw_framebuffer].color = self._highres_color
+            self._highres_color = None
 
         # Limpa o frame buffers atual
         gpu.GPU.clear_buffer()
@@ -113,8 +126,18 @@ class Renderizador:
         # ao final da renderização de um frame. Como por exemplo, executar
         # downscaling da imagem.
 
-        # Método para a troca dos buffers (NÃO IMPLEMENTADO)
-        # Esse método será utilizado na fase de implementação de animações
+        # Resolve 2x2: cada pixel final é a média dos quatro subpixels.
+        framebuffer = gpu.GPU.frame_buffer[gpu.GPU.read_framebuffer]
+        highres = framebuffer.color
+        reduced = highres.reshape(
+            self.height,
+            self.SUPERSAMPLING,
+            self.width,
+            self.SUPERSAMPLING,
+            highres.shape[2],
+        )
+        self._highres_color = highres
+        framebuffer.color = np.rint(reduced.mean(axis=(1, 3))).astype(np.uint8)
         gpu.GPU.swap_buffers()
 
     def mapping(self):
@@ -171,6 +194,9 @@ class Renderizador:
         if args.height:
             self.height = args.height
 
+        self.render_width = self.width * self.SUPERSAMPLING
+        self.render_height = self.height * self.SUPERSAMPLING
+
         path = os.path.dirname(os.path.abspath(self.x3d_file))
 
         # Iniciando simulação de GPU
@@ -181,10 +207,11 @@ class Renderizador:
 
         # Iniciando Biblioteca Gráfica
         gl.GL.setup(
-            self.width,
-            self.height,
+            self.render_width,
+            self.render_height,
             near=0.01,
-            far=1000
+            far=1000,
+            supersample=self.SUPERSAMPLING,
         )
 
         # Funções que irão fazer o rendering
@@ -206,6 +233,7 @@ class Renderizador:
 
         # Se no modo silencioso salvar imagem e não mostrar janela de visualização
         if args.quiet:
+            self.render()
             gpu.GPU.save_image()  # Salva imagem em arquivo
         else:
             window.set_saver(gpu.GPU.save_image)  # pasa a função para salvar imagens

@@ -16,7 +16,6 @@ import gpu          # Simula os recursos de uma GPU
 import math         # Funções matemáticas
 import numpy as np  # Biblioteca do Numpy
 import random
-import insper_compgraf_renderer_rs as rendrs
 
 type Vec2 = tuple[float, float]
 type Triangle = tuple[Vec2, Vec2, Vec2]
@@ -29,19 +28,227 @@ class GL:
     height = 600  # altura da tela
     near = 0.01   # plano de corte próximo
     far = 1000    # plano de corte distante
+    logical_width = 800
+    logical_height = 600
+    supersample = 1
     model_matrix = np.identity(4, dtype=float)
     matrix_stack = []
 
     @staticmethod
-    def setup(width, height, near=0.01, far=1000):
+    def setup(width, height, near=0.01, far=1000, supersample=1):
         """Definr parametros para câmera de razão de aspecto, plano próximo e distante."""
         GL.width = width
         GL.height = height
         GL.near = near
         GL.far = far
+        GL.supersample = max(1, int(supersample))
+        GL.logical_width = width / GL.supersample
+        GL.logical_height = height / GL.supersample
         # Cada nova cena comeca sem transformacoes de modelo acumuladas.
         GL.model_matrix = np.identity(4, dtype=float)
         GL.matrix_stack = []
+
+    @staticmethod
+    def _base_color(colors):
+        """Retorna a cor base em RGB 0..255 para um material X3D."""
+        emissive = np.asarray(colors.get("emissiveColor", [0.0, 0.0, 0.0]), dtype=float)
+        if np.max(np.abs(emissive)) > 1e-8:
+            return np.clip(emissive, 0.0, 1.0) * 255.0
+        diffuse = np.asarray(colors.get("diffuseColor", [0.8, 0.8, 0.8]), dtype=float)
+        return np.clip(diffuse, 0.0, 1.0) * 255.0
+
+    @staticmethod
+    def _project_vertex(point):
+        """Transforma um vértice 3D em coordenadas de tela e profundidade."""
+        vertex = np.array([point[0], point[1], point[2], 1.0], dtype=float)
+        clip = GL.projection_matrix @ GL.view_matrix @ GL.model_matrix @ vertex
+        if abs(clip[3]) < 1e-12:
+            return None
+
+        ndc = clip[:3] / clip[3]
+        return {
+            "screen": (
+                (ndc[0] + 1.0) * GL.width / 2.0,
+                (1.0 - ndc[1]) * GL.height / 2.0,
+            ),
+            "depth": float(ndc[2]),
+            "inv_w": float(1.0 / clip[3]),
+        }
+
+    @staticmethod
+    def _edge(a, b, point):
+        return ((point[0] - a[0]) * (b[1] - a[1])
+                - (point[1] - a[1]) * (b[0] - a[0]))
+
+    @staticmethod
+    def _texture_lod(vertices, texcoords, texture):
+        """Estima um nível de mipmap para a área coberta pelo triângulo."""
+        if not texture or not texcoords:
+            return 0
+
+        p0, p1, p2 = [vertex["screen"] for vertex in vertices]
+        uv0, uv1, uv2 = texcoords
+        determinant = GL._edge(p0, p1, p2)
+        if abs(determinant) < 1e-12:
+            return 0
+
+        du_dx = ((uv0[0] * (p1[1] - p2[1])
+                  + uv1[0] * (p2[1] - p0[1])
+                  + uv2[0] * (p0[1] - p1[1])) / determinant)
+        du_dy = ((uv0[0] * (p2[0] - p1[0])
+                  + uv1[0] * (p0[0] - p2[0])
+                  + uv2[0] * (p1[0] - p0[0])) / determinant)
+        dv_dx = ((uv0[1] * (p1[1] - p2[1])
+                  + uv1[1] * (p2[1] - p0[1])
+                  + uv2[1] * (p0[1] - p1[1])) / determinant)
+        dv_dy = ((uv0[1] * (p2[0] - p1[0])
+                  + uv1[1] * (p0[0] - p2[0])
+                  + uv2[1] * (p1[0] - p0[0])) / determinant)
+
+        # GPU.load_texture() mantém a convenção do código base, que transpõe
+        # os eixos da imagem. Os eixos abaixo representam a textura original.
+        width = texture[0].shape[0]
+        height = texture[0].shape[1]
+        footprint = max(
+            abs(du_dx) * width,
+            abs(du_dy) * width,
+            abs(dv_dx) * height,
+            abs(dv_dy) * height,
+            1.0,
+        )
+        return min(len(texture) - 1, max(0, int(math.floor(math.log2(footprint)))))
+
+    @staticmethod
+    def _sample_texture(texture, uv):
+        """Amostra uma textura com repetição e filtragem bilinear."""
+        if texture is None:
+            return None
+
+        u = float(uv[0]) % 1.0
+        v = float(uv[1]) % 1.0
+        array_height, array_width = texture.shape[:2]
+        width, height = array_height, array_width
+        x = u * (width - 1)
+        y = (1.0 - v) * (height - 1)
+        x0, y0 = int(math.floor(x)), int(math.floor(y))
+        x1, y1 = min(x0 + 1, width - 1), min(y0 + 1, height - 1)
+        tx, ty = x - x0, y - y0
+
+        top = texture[x0, y0] * (1.0 - tx) + texture[x1, y0] * tx
+        bottom = texture[x0, y1] * (1.0 - tx) + texture[x1, y1] * tx
+        return (top * (1.0 - ty) + bottom * ty)[:3]
+
+    @staticmethod
+    def _load_texture_mipmaps(texture_name):
+        """Gera os níveis de mipmap usando a rotina de textura do código base."""
+        mipmaps = [gpu.GPU.load_texture(texture_name)]
+        while True:
+            source = mipmaps[-1]
+            height, width = source.shape[:2]
+            if width == 1 and height == 1:
+                break
+
+            next_height = max(1, (height + 1) // 2)
+            next_width = max(1, (width + 1) // 2)
+            reduced = np.empty((next_height, next_width, source.shape[2]), dtype=np.uint8)
+            for y in range(next_height):
+                for x in range(next_width):
+                    block = source[2 * y:min(2 * y + 2, height),
+                                   2 * x:min(2 * x + 2, width)]
+                    reduced[y, x] = np.rint(block.mean(axis=(0, 1))).astype(np.uint8)
+            mipmaps.append(reduced)
+        return mipmaps
+
+    @staticmethod
+    def _write_fragment(coord, color, depth=None, alpha=1.0):
+        """Escreve um fragmento usando diretamente os buffers fornecidos."""
+        if not coord or alpha <= 0.0:
+            return False
+
+        framebuffer = gpu.GPU.frame_buffer[gpu.GPU.draw_framebuffer]
+        x, y = int(coord[0]), int(coord[1])
+        height, width = framebuffer.color.shape[:2]
+        if x < 0 or x >= width or y < 0 or y >= height:
+            return False
+
+        if depth is not None and framebuffer.depth.size != 0:
+            old_depth = float(framebuffer.depth[y, x, 0])
+            if depth >= old_depth:
+                return False
+            if alpha >= 1.0:
+                framebuffer.depth[y, x, 0] = depth
+
+        source = np.clip(np.asarray(color, dtype=float), 0.0, 255.0)
+        destination = framebuffer.color[y, x, :3].astype(float)
+        result = source * alpha + destination * (1.0 - alpha)
+        framebuffer.color[y, x, :3] = np.rint(np.clip(result, 0.0, 255.0)).astype(np.uint8)
+        return True
+
+    @staticmethod
+    def _rasterize_triangle(vertices, colors, material_colors, texcoords=None, texture=None):
+        """Rasteriza um triângulo com interpolação, profundidade e composição."""
+        points = [vertex["screen"] for vertex in vertices]
+        area = GL._edge(points[0], points[1], points[2])
+        if abs(area) < 1e-12:
+            return
+
+        min_x = max(0, int(math.floor(min(point[0] for point in points))))
+        max_x = min(GL.width - 1, int(math.ceil(max(point[0] for point in points))))
+        min_y = max(0, int(math.floor(min(point[1] for point in points))))
+        max_y = min(GL.height - 1, int(math.ceil(max(point[1] for point in points))))
+
+        base_color = GL._base_color(material_colors)
+        transparency = float(material_colors.get("transparency", 0.0))
+        alpha = np.clip(1.0 - transparency, 0.0, 1.0)
+        mip_level = GL._texture_lod(vertices, texcoords, texture)
+
+        for y in range(min_y, max_y + 1):
+            for x in range(min_x, max_x + 1):
+                sample = (x + 0.5, y + 0.5)
+                weights = [
+                    GL._edge(points[1], points[2], sample) / area,
+                    GL._edge(points[2], points[0], sample) / area,
+                    GL._edge(points[0], points[1], sample) / area,
+                ]
+                if min(weights) < -1e-8:
+                    continue
+
+                perspective = sum(
+                    weight * vertex["inv_w"]
+                    for weight, vertex in zip(weights, vertices)
+                )
+                if abs(perspective) < 1e-12:
+                    continue
+                corrected = [
+                    weight * vertex["inv_w"] / perspective
+                    for weight, vertex in zip(weights, vertices)
+                ]
+
+                depth = sum(
+                    weight * vertex["depth"]
+                    for weight, vertex in zip(weights, vertices)
+                )
+
+                color = base_color.copy()
+                if colors is not None:
+                    color = sum(
+                        factor * np.asarray(vertex_color, dtype=float) * 255.0
+                        for factor, vertex_color in zip(corrected, colors)
+                    )
+
+                if texcoords is not None and texture:
+                    uv = sum(
+                        factor * np.asarray(texcoord, dtype=float)
+                        for factor, texcoord in zip(corrected, texcoords)
+                    )
+                    texel = GL._sample_texture(texture[mip_level], uv)
+                    if texel is not None:
+                        if colors is not None:
+                            color = texel * np.clip(color / 255.0, 0.0, 1.0)
+                        else:
+                            color = texel
+
+                GL._write_fragment((x, y), color, depth, alpha)
 
     @staticmethod
     def polypoint2D(point, colors):
@@ -54,16 +261,17 @@ class GL:
         # pelo tamanho da lista e assuma que sempre vira uma quantidade par de valores.
         # O parâmetro colors é um dicionário com os tipos cores possíveis, para o Polypoint2D
         # você pode assumir inicialmente o desenho dos pontos com a cor emissiva (emissiveColor).
-        lista = []
-        for i in colors["emissiveColor"]:
-            lista.append(int(i*255))
-            print(lista)
+        lista = np.rint(GL._base_color(colors)).astype(np.uint8).tolist()
+        scale = GL.supersample
 
-        for p in range(0, len(point) // 2):
-            p = p * 2
-            posx = int(point[p])
-            posy = int(point[p+1])
-            gpu.GPU.draw_pixel([posx, posy], gpu.GPU.RGB8,lista)
+        for p in range(0, len(point), 2):
+            posx = int(round(point[p] * scale))
+            posy = int(round(point[p + 1] * scale))
+            for dx in range(scale):
+                for dy in range(scale):
+                    x, y = posx + dx, posy + dy
+                    if 0 <= x < GL.width and 0 <= y < GL.height:
+                        gpu.GPU.draw_pixel([x, y], gpu.GPU.RGB8, lista)
 
 
         # Exemplo:
@@ -85,16 +293,14 @@ class GL:
         # vira uma quantidade par de valores.
         # O parâmetro colors é um dicionário com os tipos cores possíveis, para o Polyline2D
         # você pode assumir inicialmente o desenho das linhas com a cor emissiva (emissiveColor).
-        lista = []
-
-        for i in colors["emissiveColor"]:
-            lista.append(int(i * 255))
+        lista = np.rint(GL._base_color(colors)).astype(np.uint8).tolist()
+        scale = GL.supersample
 
         for p in range(0, len(lineSegments) - 2, 2):
-            x0 = int(lineSegments[p])
-            y0 = int(lineSegments[p + 1])
-            x1 = int(lineSegments[p + 2])
-            y1 = int(lineSegments[p + 3])
+            x0 = int(round(lineSegments[p] * scale))
+            y0 = int(round(lineSegments[p + 1] * scale))
+            x1 = int(round(lineSegments[p + 2] * scale))
+            y1 = int(round(lineSegments[p + 3] * scale))
 
             if y0 == y1:
                 if x0 <= x1:
@@ -160,15 +366,18 @@ class GL:
         # O parâmetro colors é um dicionário com os tipos cores possíveis, para o Circle2D
         # você pode assumir o desenho das linhas com a cor emissiva (emissiveColor).
 
+        scale = GL.supersample
+        scaled_radius = radius * scale
         for deg in range(360):
             rad = math.radians(deg)
-            x = round(math.cos(rad) * radius)
-            y = round(math.sin(rad) * radius)
+            x = round(math.cos(rad) * scaled_radius)
+            y = round(math.sin(rad) * scaled_radius)
 
             if x < 0 or x >= GL.width or y < 0 or y >= GL.height:
                 continue
 
-            gpu.GPU.draw_pixel((x, y), gpu.GPU.RGB8, GL.colorMultiply(colors["emissiveColor"]))  
+            gpu.GPU.draw_pixel((x, y), gpu.GPU.RGB8,
+                               np.rint(GL._base_color(colors)).astype(np.uint8).tolist())
 
     @staticmethod
     def _insideTriangle(triangle: Triangle, p: Vec2) -> bool:
@@ -227,11 +436,23 @@ class GL:
         # O parâmetro colors é um dicionário com os tipos cores possíveis, para o TriangleSet2D
         # você pode assumir inicialmente o desenho das linhas com a cor emissiva (emissiveColor).
 
-        
-        rendrs.render_triangle(vertices, GL.width, GL.height, colors["emissiveColor"], gpu.GPU)
+        scale = GL.supersample
+        for offset in range(0, len(vertices), 6):
+            triangle = vertices[offset:offset + 6]
+            if len(triangle) < 6:
+                break
+            projected = [
+                {
+                    "screen": (triangle[i] * scale, triangle[i + 1] * scale),
+                    "depth": 0.0,
+                    "inv_w": 1.0,
+                }
+                for i in range(0, 6, 2)
+            ]
+            GL._rasterize_triangle(projected, None, colors)
 
     @staticmethod
-    def triangleSet(point, colors):
+    def triangleSet(point, colors, vertex_colors=None):
         """Função usada para renderizar TriangleSet."""
         # https://www.web3d.org/specifications/X3Dv4/ISO-IEC19775-1v4-IS/Part01/components/rendering.html#TriangleSet
         # Nessa função você receberá pontos no parâmetro point, esses pontos são uma lista
@@ -247,37 +468,31 @@ class GL:
         # (emissiveColor), conforme implementar novos materias você deverá suportar outros
         # tipos de cores.
 
-        # O print abaixo é só para vocês verificarem o funcionamento, DEVE SER REMOVIDO.
-        print("TriangleSet : pontos = {0}".format(point)) # imprime no terminal pontos
-        print("TriangleSet : colors = {0}".format(colors)) # imprime no terminal as cores
-
-        gpu.GPU.draw_pixel([10, 10], gpu.GPU.RGB8, [255, 255, 255])  # altera pixel
-
-        vertices2D = []
-
         if not hasattr(GL, "model_matrix"):
             GL.model_matrix = np.identity(4)
 
         if not hasattr(GL, "view_matrix"):
             GL.viewpoint([0, 0, 10], [0, 0, 1, 0], math.pi / 4)
 
+        projected = []
         for i in range(0, len(point), 3):
-            vertice = np.array([point[i], point[i + 1], point[i + 2], 1])
+            vertex = GL._project_vertex(point[i:i + 3])
+            if vertex is None:
+                return
+            projected.append(vertex)
 
-            vertice = GL.model_matrix @ vertice
-            vertice = GL.view_matrix @ vertice
-            vertice = GL.projection_matrix @ vertice
-
-            if vertice[3] != 0:
-                vertice = vertice / vertice[3]
-
-            x = (vertice[0] + 1) * GL.width / 2
-            y = (1 - vertice[1]) * GL.height / 2
-
-            vertices2D.append(x)
-            vertices2D.append(y)
-
-        GL.triangleSet2D(vertices2D, colors)
+        for offset in range(0, len(projected), 3):
+            vertices = projected[offset:offset + 3]
+            if len(vertices) < 3:
+                break
+            colors_for_triangle = None
+            if vertex_colors:
+                color_offset = offset * 3
+                colors_for_triangle = [
+                    vertex_colors[color_offset + i:color_offset + i + 3]
+                    for i in range(0, 9, 3)
+                ]
+            GL._rasterize_triangle(vertices, colors_for_triangle, colors)
 
     @staticmethod
     def viewpoint(position, orientation, fieldOfView):
@@ -473,6 +688,21 @@ class GL:
         GL._draw_indexed_triangles(point, triangles, colors)
 
     @staticmethod
+    def _split_indices(indexes):
+        """Divide uma lista de índices X3D em faces separadas por -1."""
+        faces = []
+        face = []
+        for value in list(indexes) + [-1]:
+            value = int(value)
+            if value == -1:
+                if face:
+                    faces.append(face)
+                face = []
+            else:
+                face.append(value)
+        return faces
+
+    @staticmethod
     def indexedFaceSet(coord, coordIndex, colorPerVertex, color, colorIndex,
                        texCoord, texCoordIndex, colors, current_texture):
         """Função usada para renderizar IndexedFaceSet."""
@@ -497,28 +727,81 @@ class GL:
         # cor da textura conforme a posição do mapeamento. Dentro da classe GPU já está
         # implementadado um método para a leitura de imagens.
 
-        triangles = []
-        face = []
+        coord_faces = GL._split_indices(coordIndex)
+        color_faces = GL._split_indices(colorIndex) if colorIndex else []
+        texcoord_faces = GL._split_indices(texCoordIndex) if texCoordIndex else []
+        texture = None
+        if current_texture:
+            texture = GL._load_texture_mipmaps(current_texture[0])
 
-        # Cada face convexa vira um leque: (v0,v1,v2), (v0,v2,v3), ...
-        for value in list(coordIndex) + [-1]:
-            value = int(value)
-            if value == -1:
-                if len(face) >= 3:
-                    triangles.extend(
-                        (face[0], face[i], face[i + 1])
-                        for i in range(1, len(face) - 1)
-                    )
-                face = []
-            elif value < -1:
-                raise ValueError("coordIndex deve conter indices nao negativos ou -1")
-            else:
-                face.append(value)
+        def vertex_color(index):
+            if color is None or index < 0 or 3 * index + 2 >= len(color):
+                return None
+            return color[3 * index:3 * index + 3]
 
-        # Nesta etapa do projeto, a malha usa a cor emissiva do Material, como
-        # TriangleSet. Os parametros adicionais ficam preservados para as etapas
-        # de interpolacao de cor e textura.
-        GL._draw_indexed_triangles(coord, triangles, colors)
+        def vertex_texcoord(index):
+            if texCoord is None or index < 0 or 2 * index + 1 >= len(texCoord):
+                return None
+            return texCoord[2 * index:2 * index + 2]
+
+        for face_number, face in enumerate(coord_faces):
+            if len(face) < 3:
+                continue
+            if any(index < 0 or 3 * index + 2 >= len(coord) for index in face):
+                raise ValueError("coordIndex contém um índice fora do intervalo")
+
+            face_color_indices = color_faces[face_number] if face_number < len(color_faces) else []
+            face_texcoord_indices = (
+                texcoord_faces[face_number]
+                if face_number < len(texcoord_faces) else []
+            )
+
+            for corner in range(1, len(face) - 1):
+                corner_positions = (0, corner, corner + 1)
+                triangle_indices = [face[position] for position in corner_positions]
+                vertices = [
+                    GL._project_vertex(coord[3 * index:3 * index + 3])
+                    for index in triangle_indices
+                ]
+                if any(vertex is None for vertex in vertices):
+                    continue
+
+                triangle_colors = None
+                if color:
+                    if colorPerVertex:
+                        indices = []
+                        for position, coord_index in zip(corner_positions, triangle_indices):
+                            if position < len(face_color_indices):
+                                indices.append(face_color_indices[position])
+                            else:
+                                indices.append(coord_index)
+                        triangle_colors = [vertex_color(index) for index in indices]
+                    else:
+                        index = face_color_indices[0] if face_color_indices else face_number
+                        shared = vertex_color(index)
+                        triangle_colors = [shared, shared, shared]
+                    if any(value is None for value in triangle_colors):
+                        triangle_colors = None
+
+                triangle_texcoords = None
+                if texCoord:
+                    indices = []
+                    for position, coord_index in zip(corner_positions, triangle_indices):
+                        if position < len(face_texcoord_indices):
+                            indices.append(face_texcoord_indices[position])
+                        else:
+                            indices.append(coord_index)
+                    triangle_texcoords = [vertex_texcoord(index) for index in indices]
+                    if any(value is None for value in triangle_texcoords):
+                        triangle_texcoords = None
+
+                GL._rasterize_triangle(
+                    vertices,
+                    triangle_colors,
+                    colors,
+                    triangle_texcoords,
+                    texture,
+                )
 
     @staticmethod
     def _triangulate_strip(strip):
